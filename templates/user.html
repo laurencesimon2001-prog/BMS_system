@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SBMS - Staff Management</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .add-user-form { background: rgba(255,255,255,0.05); padding: 20px; border-radius: 10px; margin-bottom: 25px; }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-top: 15px; }
+        .form-grid input, .form-grid select { 
+            padding: 10px; 
+            background: rgba(255,255,255,0.05); 
+            border: 1px solid rgba(255,255,255,0.1); 
+            color: #fff; 
+            border-radius: 5px; 
+        }
+        .create-btn { 
+            grid-column: span 3; 
+            background: #727cf5; 
+            color: white; 
+            border: none; 
+            border-radius: 5px; 
+            cursor: pointer; 
+            height: 40px; 
+            font-weight: bold; 
+            margin-top: 10px;
+        }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th { text-align: left; padding: 12px; color: #888; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        td { padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.05); color: #fff; }
+        .role-staff { color: #39afd1; font-weight: bold; }
+        .role-admin { color: #fa5c7c; font-weight: bold; }
+    </style>
+</head>
+<body>
+<div class="dashboard-container">
+    <div class="sidebar">
+        <h2>SBMS </h2>
+        <ul class="nav-links">
+            <li onclick="location.href='/dashboard'">Dashboard</li>
+            <li onclick="location.href='/tasks'">Task Manager</li>
+            <li onclick="location.href='/monitoring'">System Monitoring</li>
+            <li class="active" onclick="location.href='/users'">Staff List</li>
+        </ul>
+    </div>
+    <div class="main-content">
+        <h1>Staff Management</h1>
+
+        {% if session['role'] == 'admin' %}
+        <div class="add-user-form">
+            <h3 style="margin: 0;">Create New User Account</h3>
+            <form action="/users" method="POST" class="form-grid">
+                <input type="text" name="username" placeholder="Enter Username" required>
+                <input type="password" name="password" placeholder="Enter Password" required>
+                <select name="role">
+                    <option value="staff">Staff</option>
+                    <option value="admin">Admin</option>
+                </select>
+                <button type="submit" class="create-btn">Create Account</button>
+            </form>
+        </div>
+        {% endif %}
+
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 10%;">ID</th>
+                    <th style="width: 30%;">Name</th>
+                    <th style="width: 20%;">Role</th>
+                    <th style="width: 40%;">Created At</th>
+                </tr>
+            </thead>
+            <tbody>
+    {% for u in users %}
+    <tr>
+        <td style="color: #888;">#{{ loop.index }}</td> 
+        
+        <td style="font-weight: 500;">{{ u.username }}</td>
+        <td>
+            <span class="role-{{ u.role | lower }}">{{ u.role }}</span>
+        </td>
+        <td style="color: #aaa; font-size: 0.9em;">{{ u.created_at }}</td>
+    </tr>
+    {% endfor %}
+</tbody>
+        </table>
+    </div>
+</div>
+</body>
+</html>

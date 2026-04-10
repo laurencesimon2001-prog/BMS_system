@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SBMS - Monitoring</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: sans-serif; color: #fff; background: #1a1e2d; }
+        .status-online { color: #0acf97 !important; font-weight:bold; }
+        .status-offline { color: #fa5c7c !important; font-weight:bold; }
+
+        .dashboard-container { display: flex; min-height: 100vh; }
+        
+        /* Sidebar Logic */
+        .sidebar { width: 250px; background: #222636; padding: 20px; flex-shrink: 0; transition: 0.3s; }
+        .sidebar h2 { color: #fce6e6; text-align: center; margin-bottom: 30px; }
+        .nav-links li { cursor: pointer; padding: 12px 20px; color: #c8cfd4; transition: 0.3s; list-style: none; }
+        .nav-links li:hover { background: rgba(238, 234, 234, 0.05); border-radius: 5px; }
+        .nav-links li.active { background: #727cf5; border-radius: 5px; color: #fff; font-weight: bold; }
+
+        .main-content { flex: 1; padding: 30px; min-width: 0; }
+        
+        /* Mobile Menu Toggle */
+        .menu-btn { 
+            display: none; 
+            background: #727cf5; 
+            color: white; 
+            border: none; 
+            padding: 10px 15px; 
+            border-radius: 5px; 
+            font-weight: bold; 
+            cursor: pointer;
+            margin-bottom: 20px;
+            width: 100%;
+        }
+
+        .add-form { display: flex; flex-wrap: wrap; gap: 10px; background: rgba(255,255,255,0.05); padding: 15px; border-radius: 10px; margin-bottom: 25px; align-items: flex-end; }
+        .add-form input, .add-form select { 
+            padding: 10px; background: #2b3042; color: white; border: 1px solid rgba(255,255,255,0.2); border-radius: 5px; width: 180px; 
+        }
+        .add-btn { background: #727cf5; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; height: 38px; padding: 0 15px; }
+
+        /* Auto Scan Button Style */
+        .scan-btn { background: #0acf97; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; height: 38px; padding: 0 15px; transition: 0.3s; }
+        .scan-btn:disabled { background: #444; cursor: not-allowed; }
+
+        .search-container { margin-bottom: 15px; display: flex; justify-content: flex-end; }
+        .search-box { 
+            padding: 8px 15px; background: #2b3042; color: white; border: 1px solid rgba(255,255,255,0.2); 
+            border-radius: 20px; width: 250px; outline: none; transition: 0.3s;
+        }
+        .search-box:focus { border-color: #727cf5; box-shadow: 0 0 8px rgba(114, 124, 245, 0.4); }
+
+        .map-card { background: #222636; border-radius: 10px; margin-bottom: 25px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); }
+        .map-header { padding: 15px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); flex-wrap: wrap; gap: 10px; }
+        .map-view { position: relative; height: 500px; background: #000; overflow: hidden; cursor: crosshair; }
+        .map-view img { width: 100%; height: 100%; object-fit: contain; display: block; }
+        
+        .map-point { position: absolute; transform: translate(-50%, -100%); cursor: pointer; text-align: center; z-index: 10; pointer-events: auto; }
+        .map-point i { font-size: 24px; filter: drop-shadow(0 0 5px rgba(0,0,0,0.5)); }
+        .map-point .label { background: rgba(0,0,0,0.8); color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-top: 2px; white-space: nowrap; border: 1px solid rgba(255,255,255,0.2); }
+        
+        #pointsLayer { position: absolute; top:0; left:0; width:100%; height:100%; pointer-events: none; }
+
+        .online-pulse { color: #0acf97; animation: pulse 2s infinite; }
+        .offline-blink { color: #fa5c7c; animation: blink 1s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 1; } }
+
+        /* Table Responsive Wrapper */
+        .table-responsive { width: 100%; overflow-x: auto; background: rgba(255,255,255,0.02); border-radius: 10px; }
+        table { width: 100%; border-collapse: collapse; min-width: 600px; }
+        th, td { padding: 15px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        th { color: #888; font-size: 14px; text-transform: uppercase; }
+        
+        .delete-btn { color: #fa5c7c; text-decoration: none; font-size: 12px; }
+        .edit-link { color: #727cf5; text-decoration: none; margin-right: 12px; font-size: 12px; }
+        .modal-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:1000; }
+        .modal-content { background:#222636; width:90%; max-width:400px; margin:100px auto; padding:20px; border-radius:10px; }
+
+        /* Mobile View CSS */
+        @media (max-width: 768px) {
+            .dashboard-container { flex-direction: column; }
+            .sidebar { width: 100%; display: none; padding: 10px; }
+            .sidebar.show { display: block; }
+            .menu-btn { display: block; }
+            .main-content { padding: 15px; }
+            .map-view { height: 300px; }
+            .add-form input, .add-form select { width: 100%; }
+            .search-box { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+<div class="dashboard-container">
+    <div class="sidebar" id="sidebar">
+        <h2>SBMS 🚀</h2>
+        <ul class="nav-links">
+            <li onclick="location.href='/dashboard'">Dashboard</li>
+            <li onclick="location.href='/tasks'">Task Manager</li>
+            <li class="active" onclick="location.href='/monitoring'">System Monitoring</li>
+            <li onclick="location.href='/users'">Staff List</li>
+            <li onclick="location.href='/logout'" style="color: #fa5c7c;">Logout</li>
+        </ul>
+    </div>
+    
+    <div class="main-content">
+        <button class="menu-btn" onclick="toggleMenu()">☰ MENU / NAVIGATION</button>
+        <h1>Device Monitoring</h1><br>
+        
+        <div class="map-card">
+            <div class="map-header">
+                <div><i class="fas fa-map-marked-alt"></i> <b>Live Topology Drawing</b></div>
+                <div>
+                    {% if role == 'admin' %}
+                    <input type="file" id="mapUploadInput" hidden onchange="uploadMapFile(this)">
+                    <button class="add-btn" style="background:#444;" onclick="document.getElementById('mapUploadInput').click()">
+                        <i class="fas fa-upload"></i> Upload Drawing
+                    </button>
+                    <button id="modeBtn" class="add-btn" onclick="toggleEditMode()">
+                        <i class="fas fa-mouse-pointer"></i> Mode: View
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="map-view" id="mapView" ondblclick="handleMapDoubleClick(event)">
+                <img id="floorPlan" src="/static/uploads/maps/drawing.jpg" onerror="this.src='https://via.placeholder.com/1200x600?text=Upload+Map'">
+                <div id="pointsLayer"></div>
+            </div>
+            <div style="padding: 10px; background: rgba(255,255,255,0.05); font-size: 12px; color: #888;">
+                <i class="fas fa-info-circle"></i> Double-click on the map in <b>Place Mode</b> to pin a device.
+            </div>
+        </div>
+
+        {% if role == 'admin' %}
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 25px;">
+            <form class="add-form" method="POST" action="/monitoring" style="margin-bottom: 0;">
+                <input type="text" name="device_name" required placeholder="Device Name">
+                <input type="text" name="ip_address" required placeholder="IP Address">
+                <select name="device_type">
+                    <option value="router">Router</option>
+                    <option value="cctv">CCTV</option>
+                    <option value="pos">POS Terminal</option>
+                    <option value="wifi">Wireless/Wi-Fi</option>
+                </select>
+                <button type="submit" class="add-btn">Add Device</button>
+            </form>
+            
+            <button id="scanBtn" class="scan-btn" onclick="startAutoScan()" style="align-self: flex-end;">
+                <i class="fas fa-search-location"></i> Auto Scan Network
+            </button>
+        </div>
+        {% endif %}
+
+        <div class="search-container">
+            <input type="text" id="deviceSearch" class="search-box" placeholder="Search device or IP..." onkeyup="filterTable()">
+        </div>
+
+        <div class="table-responsive">
+            <table id="deviceTable">
+                <thead>
+                    <tr><th>Device</th><th>IP Address</th><th>Status</th><th>Action</th></tr>
+                </thead>
+                <tbody>
+                    {% for d in devices %}
+                    <tr>
+                        <td>{{ d.device_name }}<br><small style="color:#888">ID: {{ d.id }} | {{ d.device_type|upper }}</small></td>
+                        <td>{{ d.ip_address }}</td>
+                        <td class="{% if d.last_status == 'Online' %}status-online{% else %}status-offline{% endif %}">{{ d.last_status }}</td>
+                        <td>
+                            {% if role == 'admin' %}
+                            <a href="javascript:void(0)" onclick="openEditModal('{{ d.id }}', '{{ d.device_name|e }}', '{{ d.ip_address }}', '{{ d.device_type }}')" class="edit-link">Edit</a>
+                            <a href="{{ url_for('delete_device_page', id=d.id) }}" class="delete-btn" onclick="return confirm('Remove this device?')">Remove</a>
+                            {% else %}
+                            <span style="color: #666; font-size: 12px;"><i class="fas fa-lock"></i> Read Only</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div id="editModal" class="modal-overlay">
+            <div class="modal-content">
+                <h3>Edit Device Settings</h3><br>
+                <form id="editForm" method="POST">
+                    <input type="hidden" id="edit_id" name="id">
+                    <div style="margin-bottom:15px;"><label>Device Name</label><br><input type="text" id="edit_name" name="device_name" style="width:100%; padding:8px; background:#2b3042; color:white; border:1px solid #444; border-radius: 4px;"></div>
+                    <div style="margin-bottom:15px;"><label>IP Address</label><br><input type="text" id="edit_ip" name="ip_address" style="width:100%; padding:8px; background:#2b3042; color:white; border:1px solid #444; border-radius: 4px;"></div>
+                    <div style="margin-bottom:15px;"><label>Device Type</label><br><select id="edit_type" name="device_type" style="width:100%; padding:8px; background:#2b3042; color:white; border:1px solid #444; border-radius: 4px;"><option value="router">Router</option><option value="cctv">CCTV</option><option value="pos">POS Terminal</option><option value="wifi">Wireless/Wi-Fi</option></select></div>
+                    <button type="submit" class="add-btn" style="width:100%;">Save Changes</button>
+                    <button type="button" onclick="closeEditModal()" style="width:100%; margin-top:10px; background:transparent; color:#888; border:none; cursor:pointer;">Cancel</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let editMode = false;
+
+function toggleMenu() {
+    const sidebar = document.getElementById('sidebar');
+    sidebar.classList.toggle('show');
+}
+
+function startAutoScan() {
+    const btn = document.getElementById('scanBtn');
+    if (!confirm("Starting network scan. This may take a moment. Proceed?")) return;
+    
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scanning...';
+
+    fetch('/api/scan-network', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    })
+    .then(response => {
+        // 504 ဒါမှမဟုတ် တခြား error တက်ရင် ဒီမှာ အရင်စစ်မယ်
+        if (!response.ok) {
+            if(response.status === 504) throw new Error("Server took too long to respond (Timeout). Please wait a moment and refresh.");
+            throw new Error("Server error: " + response.status);
+        }
+        return response.json();
+    })
+    .then(data => {
+        alert(data.message);
+        location.reload(); 
+    })
+    .catch(error => {
+        console.error('Error Details:', error);
+        alert(error.message || "Scan failed. Please check connection.");
+    })
+    .finally(() => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-search-location"></i> Auto Scan Network';
+    });
+}
+
+function filterTable() {
+    const input = document.getElementById('deviceSearch');
+    const filter = input.value.toLowerCase();
+    const table = document.getElementById('deviceTable');
+    const tr = table.getElementsByTagName('tr');
+    for (let i = 1; i < tr.length; i++) {
+        const tdName = tr[i].getElementsByTagName('td')[0];
+        const tdIP = tr[i].getElementsByTagName('td')[1];
+        if (tdName || tdIP) {
+            const txtValue = (tdName.textContent || tdName.innerText) + (tdIP.textContent || tdIP.innerText);
+            tr[i].style.display = txtValue.toLowerCase().indexOf(filter) > -1 ? "" : "none";
+        }
+    }
+}
+
+function openEditModal(id, name, ip, type) {
+    document.getElementById('edit_id').value = id;
+    document.getElementById('edit_name').value = name;
+    document.getElementById('edit_ip').value = ip;
+    document.getElementById('edit_type').value = type;
+    document.getElementById('editForm').action = "/edit_device/" + id;
+    document.getElementById('editModal').style.display = 'block';
+}
+
+function closeEditModal() { document.getElementById('editModal').style.display = 'none'; }
+
+function toggleEditMode() {
+    editMode = !editMode;
+    const btn = document.getElementById('modeBtn');
+    btn.innerHTML = editMode ? '<i class="fas fa-plus-circle"></i> Mode: Place' : '<i class="fas fa-mouse-pointer"></i> Mode: View';
+    btn.style.background = editMode ? '#fa5c7c' : '#727cf5';
+}
+
+async function handleMapDoubleClick(e) {
+    if (!editMode) return;
+    const response = await fetch('/api/devices/unpositioned');
+    const unpositionedDevices = await response.json();
+    if (unpositionedDevices.length === 0) { alert("No devices available to pin!"); return; }
+    let listMessage = "Select a Device:\n";
+    unpositionedDevices.forEach((d, index) => { listMessage += `${index + 1}. ${d.device_name} (ID: ${d.id})\n`; });
+    const choice = prompt(listMessage);
+    if (choice) {
+        const selectedDevice = unpositionedDevices[parseInt(choice) - 1] || unpositionedDevices.find(d => d.id == choice.trim());
+        if (selectedDevice) {
+            const rect = document.getElementById('mapView').getBoundingClientRect();
+            const x = ((e.clientX - rect.left) / rect.width) * 100;
+            const y = ((e.clientY - rect.top) / rect.height) * 100;
+            fetch('/api/devices/set_position', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: selectedDevice.id, ps_x: parseFloat(x.toFixed(2)), ps_y: parseFloat(y.toFixed(2)) })
+            }).then(res => res.json()).then(data => { if(data.success) { loadPoints(); } });
+        }
+    }
+}
+
+function uploadMapFile(input) {
+    if (input.files && input.files[0]) {
+        let formData = new FormData();
+        formData.append('map_file', input.files[0]);
+        fetch('/api/upload_map', { method: 'POST', body: formData }).then(res => res.json()).then(data => {
+            if(data.success) {
+                document.getElementById('floorPlan').src = data.map_url + "?t=" + new Date().getTime();
+                setTimeout(loadPoints, 500);
+            }
+        });
+    }
+}
+
+function loadPoints() {
+    fetch('/api/devices').then(res => res.json()).then(devices => {
+        const layer = document.getElementById('pointsLayer');
+        if(!layer) return;
+        layer.innerHTML = ''; 
+        devices.forEach(d => {
+            if (d.ps_x !== null && d.ps_y !== null) {
+                const div = document.createElement('div');
+                div.className = 'map-point';
+                div.style.left = d.ps_x + '%';
+                div.style.top = d.ps_y + '%';
+                const statusClass = d.last_status === 'Online' ? 'online-pulse' : 'offline-blink';
+                let icon = 'fa-server';
+                if(d.device_type === 'cctv') icon = 'fa-video';
+                else if(d.device_type === 'wifi') icon = 'fa-wifi';
+                else if(d.device_type === 'router') icon = 'fa-network-wired';
+                div.innerHTML = `<i class="fas ${icon} ${statusClass}"></i><div class="label">${d.device_name}</div>`;
+                layer.appendChild(div);
+            }
+        });
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('floorPlan').onload = loadPoints;
+    setInterval(loadPoints, 10000);
+});
+</script>
+</body>
+</html>
