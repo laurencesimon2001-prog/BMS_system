@@ -205,15 +205,13 @@ function updateDashboard() {
     fetch('/api/stats')
         .then(res => res.json())
         .then(data => {
-            // ၁။ Stats Card တွေ Update လုပ်မယ်
+ 
             document.getElementById('net-val').innerText = data.internet;
             document.getElementById('router-val').innerText = data.router;
             
-            // Task Count (ID ထည့်ပေးထားတယ်)
             const taskVal = document.getElementById('task-val');
             if (taskVal) taskVal.innerText = data.active_tasks;
             
-            // Health section update လုပ်မယ်
             const cctvVal = document.getElementById('cctv-val');
             if (cctvVal) {
                 cctvVal.innerText = data.cctv;
@@ -226,7 +224,6 @@ function updateDashboard() {
                 posVal.className = data.pos.includes('0/') ? 'status-offline' : 'status-online';
             }
 
-            // ၂။ Chart Update (Wireless တွေပါပါအောင် Backend က ပို့တဲ့ Raw data သုံးမယ်)
             const onCount = data.total_online_raw || 0;
             const offCount = data.total_offline_raw || 0;
 

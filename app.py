@@ -97,7 +97,6 @@ def get_ping_status(ip):
         if current_os == "windows":
             cmd = ['ping', '-n', '1', '-w', '1000', ip]
         else:
-            # ဒီနေရာမှာ 'ping' အစား '/usr/bin/ping' (Full Path) ကို သုံးရပါမယ်
             cmd = ['/usr/bin/ping', '-c', '1', '-W', '1', ip]
         
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -107,16 +106,14 @@ def get_ping_status(ip):
         return "Offline"
     
 def check_and_update(dev):
-    """Device တစ်ခုချင်းစီကို စစ်ဆေးပြီး လိုအပ်ရင် Update လုပ်ပေးမယ့် အလုပ်သမားလေး"""
+    """Checks individual device status and updates the database record"""
     try:
         current_status = get_ping_status(dev['ip_address'])
         old_status = dev['last_status'] if dev['last_status'] else "Offline"
         
         if old_status != current_status:
             dev_id_str = str(dev['id'])
-            # Cache ထဲမှာ အခြေအနေ အတူတူပဲ ရှိနေရင် ထပ်မပို့အောင် စစ်တယ်
             if last_status_cache.get(dev_id_str) != current_status:
-                # Telegram Alert ကို thread နဲ့ ပို့မယ်
                 threading.Thread(
                     target=send_telegram_alert, 
                     args=(dev['id'], dev['ip_address'], current_status), 
@@ -124,27 +121,24 @@ def check_and_update(dev):
                 ).start()
                 last_status_cache[dev_id_str] = current_status
             
-            # Database Update လုပ်တယ်
+            # Database Update 
             execute_db("UPDATE devices SET last_status=%s, updated_at=NOW() WHERE id=%s", (current_status, dev['id']))
             execute_db("INSERT INTO device_logs (device_id, device_name, status) VALUES (%s, %s, %s)", (dev['id'], dev['device_name'], current_status))
     except Exception as e:
         print(f"Error checking device {dev['ip_address']}: {e}")
 
 def background_monitor():
-    """အလုပ်သမား ၅၀ ကို တစ်ပြိုင်တည်း ခိုင်းပြီး အမြန်စစ်မယ့် Monitor"""
+    """Parallel Monitoring - Optimized for high-device environments (300+ devices)"""
     print("[System] Parallel Monitor Started - 300+ Devices Optimized Mode")
     while True:
         try:
-            # Database ကနေ device စာရင်း ယူတယ်
             devices = query_db("SELECT id, device_name, ip_address, last_status FROM devices")
             if devices:
-                # အလုပ်သမား (Threads) ၅၀ နဲ့ တစ်ပြိုင်တည်း ပစ်စစ်မယ်
                 with ThreadPoolExecutor(max_workers=50) as executor:
                     executor.map(check_and_update, devices)
         except Exception as e:
             print(f"Monitor Loop Error: {e}")
         
-        # တစ်ပတ်ပြီးတိုင်း ၅ စက္ကန့် သို့မဟုတ် ၁၀ စက္ကန့် နားမယ်
         time.sleep(5)
 
 def get_device_counts(dtype):
@@ -160,28 +154,23 @@ def get_device_counts(dtype):
 @login_required
 def get_stats():
     try:
-        # ၁။ အခြေခံအချက်အလက်များကို Query လုပ်ခြင်း
         total_users = query_db("SELECT COUNT(*) as count FROM users", one=True)
         active_tasks = query_db("SELECT COUNT(*) as count FROM tasks WHERE status!='Done'", one=True)
         
-        # စက်ပစ္စည်းများ၏ Status ကို တွက်ချက်ခြင်း
         internet = get_ping_status("8.8.8.8")
         router = get_device_counts('router')
         cctv = get_device_counts('cctv')
         
-        # POS အတွက် သီးသန့် Query
         pos_data = query_db("SELECT COUNT(*) as count FROM devices WHERE LOWER(device_type) LIKE '%pos%' AND last_status='Online'", one=True)
         pos_total = query_db("SELECT COUNT(*) as count FROM devices WHERE LOWER(device_type) LIKE '%pos%'", one=True)
 
-        # ၂။ Chart အတွက် Device အားလုံးကို ခြုံငုံပြီး တွက်ချက်ခြင်း (Wireless + Router အကုန်ပါတယ်)
-        # ဒီအပိုင်းကို Try block ထဲမှာ အမှန်ကန်ဆုံး Indent လုပ်ထားတယ်
+
         t_on = query_db("SELECT COUNT(*) as count FROM devices WHERE last_status = 'Online'", one=True)
         t_all = query_db("SELECT COUNT(*) as count FROM devices", one=True)
         
         on_count = t_on['count'] if t_on else 0
         all_count = t_all['count'] if t_all else 0
 
-        # ၃။ အချက်အလက်အားလုံးကို JSON ပုံစံဖြင့် ပြန်ပို့ခြင်း
         return jsonify({
             "total_users": total_users['count'] if total_users else 0,
             "active_tasks": active_tasks['count'] if active_tasks else 0,
