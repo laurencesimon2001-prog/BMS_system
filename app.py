@@ -1,4 +1,3 @@
-import threading
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from db import query_db, execute_db
 import subprocess, platform, os
@@ -10,6 +9,7 @@ import time
 import requests  
 from dotenv import load_dotenv
 import nmap
+import threading
 
 # --- Load Environment Variables ---
 env_path = os.path.join(os.path.dirname(__file__), 'tg.env')
