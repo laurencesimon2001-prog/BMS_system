@@ -1,5 +1,4 @@
 import threading
-
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from db import query_db, execute_db
 import subprocess, platform, os
