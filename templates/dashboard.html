@@ -37,7 +37,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
     background: rgba(255,255,255,0.05); 
     padding: 20px; 
     border-radius: 10px; 
-    height: 350px; /* Chart အမြင့်ကို ပုံေသထားလိုက်မယ် */
+    height: 350px; 
 }
 
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
@@ -112,7 +112,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
             </div>
             <div class="stat-card">
                 <h3>Active Tasks</h3>
-                <div class="value" style="color: #ffbc00;">{{ active_tasks }}</div>
+                <div id="task-val" class="value" style="color: #ffbc00;">{{ active_tasks }}</div>
             </div>
         </div>
 
@@ -167,7 +167,13 @@ const deviceStatusChart = new Chart(statusCtx, {
         labels: ['Online', 'Offline'],
         datasets: [{ data: [0, 0], backgroundColor: ['#0acf97', '#fa5c7c'], borderWidth: 0 }]
     },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#888' } } } }
+    options: { 
+        responsive: true, 
+        maintainAspectRatio: false, 
+        plugins: { 
+            legend: { position: 'bottom', labels: { color: '#888' } } 
+        } 
+    }
 });
 
 const uptimeCtx = document.getElementById('uptimeChart').getContext('2d');
@@ -175,34 +181,61 @@ const uptimeChart = new Chart(uptimeCtx, {
     type: 'line',
     data: {
         labels: ['12am', '4am', '8am', '12pm', '4pm', '8pm'],
-        datasets: [{ label: 'Uptime %', data: [100, 100, 98, 100, 99, 100], borderColor: '#727cf5', backgroundColor: 'rgba(114, 124, 245, 0.1)', fill: true, tension: 0.4 }]
+        datasets: [{ 
+            label: 'Uptime %', 
+            data: [100, 100, 98, 100, 99, 100], 
+            borderColor: '#727cf5', 
+            backgroundColor: 'rgba(114, 124, 245, 0.1)', 
+            fill: true, 
+            tension: 0.4 
+        }]
     },
-    options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, max: 100, ticks: { color: '#888' } }, x: { ticks: { color: '#888' } } }, plugins: { legend: { display: false } } }
+    options: { 
+        responsive: true, 
+        maintainAspectRatio: false, 
+        scales: { 
+            y: { beginAtZero: true, max: 100, ticks: { color: '#888' } }, 
+            x: { ticks: { color: '#888' } } 
+        }, 
+        plugins: { legend: { display: false } } 
+    }
 });
 
 function updateDashboard() {
     fetch('/api/stats')
         .then(res => res.json())
         .then(data => {
+            // ၁။ Stats Card တွေ Update လုပ်မယ်
             document.getElementById('net-val').innerText = data.internet;
-            document.getElementById('net-val').className = 'value ' + (data.internet === 'Online' ? 'status-online' : 'status-offline');
             document.getElementById('router-val').innerText = data.router;
             
-            if (document.getElementById('cctv-val')) {
-                document.getElementById('cctv-val').innerText = data.cctv;
-                document.getElementById('cctv-val').className = data.cctv.includes('Online') ? 'status-online' : 'status-offline';
+            // Task Count (ID ထည့်ပေးထားတယ်)
+            const taskVal = document.getElementById('task-val');
+            if (taskVal) taskVal.innerText = data.active_tasks;
+            
+            // Health section update လုပ်မယ်
+            const cctvVal = document.getElementById('cctv-val');
+            if (cctvVal) {
+                cctvVal.innerText = data.cctv;
+                cctvVal.className = data.cctv.includes('0/') ? 'status-offline' : 'status-online';
+            }
+            
+            const posVal = document.getElementById('pos-val');
+            if (posVal) {
+                posVal.innerText = data.pos;
+                posVal.className = data.pos.includes('0/') ? 'status-offline' : 'status-online';
             }
 
-            // Chart Data Logic
-            const r = data.router.split('/');
-            const c = data.cctv.split('/');
-            if (r.length > 1 && c.length > 1) {
-                const on = parseInt(r[0]) + parseInt(c[0]);
-                const off = (parseInt(r[1]) + parseInt(c[1])) - on;
-                deviceStatusChart.data.datasets[0].data = [on, off];
-                deviceStatusChart.update();
-            }
-        });
+            // ၂။ Chart Update (Wireless တွေပါပါအောင် Backend က ပို့တဲ့ Raw data သုံးမယ်)
+            const onCount = data.total_online_raw || 0;
+            const offCount = data.total_offline_raw || 0;
+
+            deviceStatusChart.data.datasets[0].data = [onCount, offCount];
+            deviceStatusChart.update();
+            
+            console.log(`Chart Refresh: ${onCount} Online / ${offCount} Offline`);
+        })
+        .catch(err => console.error("Update Error:", err));
 }
 
 function updateLogs() {
@@ -210,17 +243,21 @@ function updateLogs() {
         .then(res => res.json())
         .then(logs => {
             const container = document.getElementById('logs-container');
+            if (!container) return;
+            
             container.innerHTML = logs.map(log => `
                 <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
                     <td style="padding: 10px; color: #888;">${log.timestamp}</td>
                     <td style="padding: 10px;">${log.device_name}</td>
-                    <td style="padding: 10px;" class="${log.status === 'Online' ? 'status-online' : 'status-offline'}">${log.status}</td>
+                    <td style="padding: 10px;" class="${log.status.trim() === 'Online' ? 'status-online' : 'status-offline'}">${log.status}</td>
                 </tr>`).join('');
-        });
+        })
+        .catch(err => console.error("Logs Fetch Error:", err));
 }
 
 setInterval(updateDashboard, 5000);
 setInterval(updateLogs, 10000);
+
 updateDashboard();
 updateLogs();
 </script>

@@ -1,32 +1,54 @@
+import threading
+
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from db import query_db, execute_db
 import subprocess, platform, os
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from functools import wraps
-import threading
+from concurrent.futures import ThreadPoolExecutor
 import time
 import requests  
+from dotenv import load_dotenv
 import nmap
 
+# --- Load Environment Variables ---
+env_path = os.path.join(os.path.dirname(__file__), 'tg.env')
+load_dotenv(env_path)
+
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "lucifer_secret_key_123")
+app.secret_key = os.getenv("SECRET_KEY", "lucifer secret key 123")
 
 UPLOAD_FOLDER = 'static/uploads/maps'
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# Telegram 
-TELEGRAM_TOKEN = "8681229911:AAHKKn6Q09AcxjRWlDHrNLGSz3wXFi6T-pI"
-TELEGRAM_CHAT_ID = "5997278498"
+# --- Telegram Configuration ---
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+RAW_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+try:
+    TELEGRAM_CHAT_ID = int(RAW_CHAT_ID) if RAW_CHAT_ID else None
+except (ValueError, TypeError):
+    TELEGRAM_CHAT_ID = RAW_CHAT_ID
+
+# --- DEBUG PRINT (Terminal မှာ စစ်ဖို့) ---
+print(f"DEBUG: Token is {TELEGRAM_TOKEN}")
+print(f"DEBUG: Chat ID is {TELEGRAM_CHAT_ID} (Type: {type(TELEGRAM_CHAT_ID)})")
 
 last_status_cache = {}
 
 def send_telegram_alert(device_id, ip, status):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Telegram Configuration Error: Missing Token or Chat ID")
+        return
+
+    # Emoji and status text logic
     emoji = "🟢" if status == "Online" else "🔴"
     status_text = "BACK ONLINE" if status == "Online" else "OFFLINE"
     
+    # Message formatting with HTML support
     msg = (
         f"{emoji} <b>SBMS Monitoring Alert</b>\n"
         f"━━━━━━━━━━━━━━━\n"
@@ -37,11 +59,19 @@ def send_telegram_alert(device_id, ip, status):
         f"━━━━━━━━━━━━━━━"
     )
     
+    # Sending request to Telegram API
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try:
-        requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=5)
+        response = requests.post(
+            url, 
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"}, 
+            timeout=5
+        )
+        if response.status_code != 200:
+            print(f"Telegram API Error: {response.text}")
+            
     except Exception as e:
-        print(f"Telegram Error: {e}")
+        print(f"Telegram Connection Error: {e}")
 
 def login_required(f):
     @wraps(f)
@@ -75,28 +105,47 @@ def get_ping_status(ip):
     except Exception as e:
         print(f"Ping Error for {ip}: {e}")
         return "Offline"
+    
+def check_and_update(dev):
+    """Device တစ်ခုချင်းစီကို စစ်ဆေးပြီး လိုအပ်ရင် Update လုပ်ပေးမယ့် အလုပ်သမားလေး"""
+    try:
+        current_status = get_ping_status(dev['ip_address'])
+        old_status = dev['last_status'] if dev['last_status'] else "Offline"
+        
+        if old_status != current_status:
+            dev_id_str = str(dev['id'])
+            # Cache ထဲမှာ အခြေအနေ အတူတူပဲ ရှိနေရင် ထပ်မပို့အောင် စစ်တယ်
+            if last_status_cache.get(dev_id_str) != current_status:
+                # Telegram Alert ကို thread နဲ့ ပို့မယ်
+                threading.Thread(
+                    target=send_telegram_alert, 
+                    args=(dev['id'], dev['ip_address'], current_status), 
+                    daemon=True
+                ).start()
+                last_status_cache[dev_id_str] = current_status
+            
+            # Database Update လုပ်တယ်
+            execute_db("UPDATE devices SET last_status=%s, updated_at=NOW() WHERE id=%s", (current_status, dev['id']))
+            execute_db("INSERT INTO device_logs (device_id, device_name, status) VALUES (%s, %s, %s)", (dev['id'], dev['device_name'], current_status))
+    except Exception as e:
+        print(f"Error checking device {dev['ip_address']}: {e}")
 
 def background_monitor():
-    print("[System] Monitor Started - Database Only Mode")
+    """အလုပ်သမား ၅၀ ကို တစ်ပြိုင်တည်း ခိုင်းပြီး အမြန်စစ်မယ့် Monitor"""
+    print("[System] Parallel Monitor Started - 300+ Devices Optimized Mode")
     while True:
         try:
+            # Database ကနေ device စာရင်း ယူတယ်
             devices = query_db("SELECT id, device_name, ip_address, last_status FROM devices")
             if devices:
-                for dev in devices:
-                    current_status = get_ping_status(dev['ip_address'])
-                    old_status = dev['last_status'] if dev['last_status'] else "Offline"
-                    
-                    if old_status != current_status:
-                        dev_id_str = str(dev['id'])
-                        if last_status_cache.get(dev_id_str) != current_status:
-                            send_telegram_alert(dev['id'], dev['ip_address'], current_status)
-                            last_status_cache[dev_id_str] = current_status
-                        
-                        execute_db("UPDATE devices SET last_status=%s, updated_at=NOW() WHERE id=%s", (current_status, dev['id']))
-                        execute_db("INSERT INTO device_logs (device_id, device_name, status) VALUES (%s, %s, %s)", (dev['id'], dev['device_name'], current_status))
+                # အလုပ်သမား (Threads) ၅၀ နဲ့ တစ်ပြိုင်တည်း ပစ်စစ်မယ်
+                with ThreadPoolExecutor(max_workers=50) as executor:
+                    executor.map(check_and_update, devices)
         except Exception as e:
             print(f"Monitor Loop Error: {e}")
-        time.sleep(10)
+        
+        # တစ်ပတ်ပြီးတိုင်း ၅ စက္ကန့် သို့မဟုတ် ၁၀ စက္ကန့် နားမယ်
+        time.sleep(5)
 
 def get_device_counts(dtype):
     total = query_db("SELECT COUNT(*) as count FROM devices WHERE LOWER(TRIM(device_type)) LIKE %s", (f"%{dtype.lower()}%",), one=True)
@@ -110,24 +159,46 @@ def get_device_counts(dtype):
 @app.route('/api/stats')
 @login_required
 def get_stats():
-    total_users = query_db("SELECT COUNT(*) as count FROM users", one=True)
-    active_tasks = query_db("SELECT COUNT(*) as count FROM tasks WHERE status!='Done'", one=True)
-    
-    internet = get_ping_status("8.8.8.8")
-    router = get_device_counts('router')
-    cctv = get_device_counts('cctv')
-    pos = query_db("SELECT COUNT(*) as count FROM devices WHERE LOWER(device_type) LIKE '%pos%' AND last_status='Online'", one=True)
-    pos_total = query_db("SELECT COUNT(*) as count FROM devices WHERE LOWER(device_type) LIKE '%pos%'", one=True)
- 
-    return jsonify({
-        "total_users": total_users['count'] if total_users else 0,
-        "active_tasks": active_tasks['count'] if active_tasks else 0,
-        "internet": internet,
-        "router": router,
-        "cctv": cctv,
-        "pos": f"{pos['count']}/{pos_total['count']} Online" if pos_total else "0/0 Online"
-    })
+    try:
+        # ၁။ အခြေခံအချက်အလက်များကို Query လုပ်ခြင်း
+        total_users = query_db("SELECT COUNT(*) as count FROM users", one=True)
+        active_tasks = query_db("SELECT COUNT(*) as count FROM tasks WHERE status!='Done'", one=True)
+        
+        # စက်ပစ္စည်းများ၏ Status ကို တွက်ချက်ခြင်း
+        internet = get_ping_status("8.8.8.8")
+        router = get_device_counts('router')
+        cctv = get_device_counts('cctv')
+        
+        # POS အတွက် သီးသန့် Query
+        pos_data = query_db("SELECT COUNT(*) as count FROM devices WHERE LOWER(device_type) LIKE '%pos%' AND last_status='Online'", one=True)
+        pos_total = query_db("SELECT COUNT(*) as count FROM devices WHERE LOWER(device_type) LIKE '%pos%'", one=True)
 
+        # ၂။ Chart အတွက် Device အားလုံးကို ခြုံငုံပြီး တွက်ချက်ခြင်း (Wireless + Router အကုန်ပါတယ်)
+        # ဒီအပိုင်းကို Try block ထဲမှာ အမှန်ကန်ဆုံး Indent လုပ်ထားတယ်
+        t_on = query_db("SELECT COUNT(*) as count FROM devices WHERE last_status = 'Online'", one=True)
+        t_all = query_db("SELECT COUNT(*) as count FROM devices", one=True)
+        
+        on_count = t_on['count'] if t_on else 0
+        all_count = t_all['count'] if t_all else 0
+
+        # ၃။ အချက်အလက်အားလုံးကို JSON ပုံစံဖြင့် ပြန်ပို့ခြင်း
+        return jsonify({
+            "total_users": total_users['count'] if total_users else 0,
+            "active_tasks": active_tasks['count'] if active_tasks else 0,
+            "internet": internet,
+            "router": router,
+            "cctv": cctv,
+            "pos": f"{pos_data['count']}/{pos_total['count']} Online" if pos_total else "0/0 Online",
+            # Chart ဆွဲရန်အတွက် Online ၅ ခုလုံး ပါမည့် Raw Data
+            "total_online_raw": on_count,
+            "total_offline_raw": all_count - on_count
+        })
+
+    except Exception as e:
+        # Error တက်လျှင် Terminal တွင် ပြသရန်
+        print(f"Error in get_stats: {e}")
+        return jsonify({"error": str(e)}), 500
+    
 @app.route('/api/scan-network', methods=['POST'])
 @login_required
 @admin_required
@@ -136,27 +207,23 @@ def scan_network_api():
         # Initialize PortScanner
         nm = nmap.PortScanner()
         
-        # Target networks (Docker network ဖြစ်တဲ့ 0.0 ကို ဖယ်ထားပါတယ်)
         target_networks = "192.168.90.0/24 192.168.100.0/24"
         
-        # Scan arguments: 
-        # -sn (Ping scan), -PE (ICMP Echo), -T4 (Aggressive timing)
-        # --exclude-interfaces က တချို့ version တွေမှာ error တက်တတ်လို့ အသုံးအများဆုံး interface တွေပဲ ဖယ်ထားပါမယ်
         scan_args = '-sn -PE -T4'
         
         nm.scan(hosts=target_networks, arguments=scan_args)
         
-        # လက်ရှိ DB ထဲက IP တွေကို ဆွဲထုတ်
+        
         existing_devices = query_db("SELECT ip_address FROM devices")
         existing_ips = [d['ip_address'] for d in existing_devices]
         
         new_devices_count = 0
         
         for host in nm.all_hosts():
-            # စက်က online ဖြစ်နေမှ ထည့်မယ်
+            
             if nm[host].state() == 'up':
                 if host not in existing_ips:
-                    # Hostname မရှိရင် 'New Device' လို့ ပေးမယ်
+                
                     hostname = nm[host].hostname() or f"New Device ({host})"
                     
                     execute_db(
@@ -174,7 +241,7 @@ def scan_network_api():
     except nmap.PortScannerError as e:
         return jsonify({"status": "error", "message": f"Nmap Error: {str(e)}"}), 500
     except Exception as e:
-        # ဘာ error လဲဆိုတာ terminal မှာ မြင်ရအောင် print ထုတ်ထားပါ
+    
         print(f"DEBUG ERROR: {str(e)}")
         return jsonify({"status": "error", "message": f"System Error: {str(e)}"}), 500
     
