@@ -33,7 +33,6 @@ try:
 except (ValueError, TypeError):
     TELEGRAM_CHAT_ID = RAW_CHAT_ID
 
-# --- DEBUG PRINT (Terminal မှာ စစ်ဖို့) ---
 print(f"DEBUG: Token is {TELEGRAM_TOKEN}")
 print(f"DEBUG: Chat ID is {TELEGRAM_CHAT_ID} (Type: {type(TELEGRAM_CHAT_ID)})")
 
@@ -121,7 +120,7 @@ def check_and_update(dev):
                 ).start()
                 last_status_cache[dev_id_str] = current_status
             
-            # Database Update 
+           
             execute_db("UPDATE devices SET last_status=%s, updated_at=NOW() WHERE id=%s", (current_status, dev['id']))
             execute_db("INSERT INTO device_logs (device_id, device_name, status) VALUES (%s, %s, %s)", (dev['id'], dev['device_name'], current_status))
     except Exception as e:
@@ -178,13 +177,11 @@ def get_stats():
             "router": router,
             "cctv": cctv,
             "pos": f"{pos_data['count']}/{pos_total['count']} Online" if pos_total else "0/0 Online",
-            # Chart ဆွဲရန်အတွက် Online ၅ ခုလုံး ပါမည့် Raw Data
             "total_online_raw": on_count,
             "total_offline_raw": all_count - on_count
         })
 
     except Exception as e:
-        # Error တက်လျှင် Terminal တွင် ပြသရန်
         print(f"Error in get_stats: {e}")
         return jsonify({"error": str(e)}), 500
     
